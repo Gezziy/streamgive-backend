@@ -4,7 +4,7 @@ import rateLimit from '@fastify/rate-limit';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import Fastify from 'fastify';
-import type { FastifyError } from 'fastify';
+import type { FastifyError, FastifyReply } from 'fastify';
 
 import { prisma } from './db.js';
 import { recordHttpRequest, renderMetrics } from './metrics.js';
@@ -15,6 +15,7 @@ import { indexerStatusRoutes } from './routes/indexerStatus.js';
 import { getLatestLedgerSequence } from './stellar/rpc.js';
 import { ngoApplicationRoutes } from './routes/ngoApplications.js';
 import { ngoRoutes } from './routes/ngos.js';
+import { deadLetterRoutes } from './routes/deadLetters.js';
 import { streamRoutes } from './routes/streams.js';
 import { registerRequestIdHeader, requestIdOptions } from './requestId.js';
 import { registerCompression } from './plugins/compression.js';
@@ -229,7 +230,7 @@ export function buildServer(options?: BuildServerOptions) {
    * @auth Public
    * @returns 200 or 503 `{ status: "ok" | "error", db: "ok" | "error", rpc: "ok" | "error" }`.
    */
-  app.get('/health', async (_req, reply) => {
+  const healthHandler = async (_req: unknown, reply: FastifyReply) => {
     const [dbResult, rpcResult] = await Promise.allSettled([
       prisma.$queryRaw`SELECT 1`,
       getLatestLedgerSequence(),
@@ -238,9 +239,12 @@ export function buildServer(options?: BuildServerOptions) {
     const db = dbResult.status === 'fulfilled' ? 'ok' : 'error';
     const rpc = rpcResult.status === 'fulfilled' ? 'ok' : 'error';
 
-      const status = db === 'ok' && rpc === 'ok' ? 'ok' : 'error';
-      return reply.code(status === 'ok' ? 200 : 503).send({ status, db, rpc });
-  });
+    const status = db === 'ok' && rpc === 'ok' ? 'ok' : 'error';
+    return reply.code(status === 'ok' ? 200 : 503).send({ status, db, rpc });
+  };
+
+  app.get('/health', healthHandler);
+  app.get('/v1/health', healthHandler);
 
   /**
    * Checks readiness, including database availability and indexer lag.
@@ -338,6 +342,7 @@ export function buildServer(options?: BuildServerOptions) {
   app.register(impactRoutes, apiPrefix);
   app.register(ngoApplicationRoutes, apiPrefix);
   app.register(indexerStatusRoutes, apiPrefix);
+  app.register(deadLetterRoutes, apiPrefix);
 
   return app;
 }
