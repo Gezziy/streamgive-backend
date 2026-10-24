@@ -153,6 +153,85 @@ describe('POST /v1/ngo-applications', () => {
     await app.close();
   });
 
+  it('accepts an already-schemed http website without double-prepending', async () => {
+    const app = buildServer();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/ngo-applications',
+      payload: await signedApplicationPayload(app, { website: 'http://example.org' }),
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json().website).toBe('http://example.org');
+
+    await app.close();
+  });
+
+  it('rejects a whitespace-only name with 400', async () => {
+    const app = buildServer();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/ngo-applications',
+      payload: await signedApplicationPayload(app, { name: '   ' }),
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe('invalid_request');
+
+    await app.close();
+  });
+
+  it('rejects a whitespace-only description with 400', async () => {
+    const app = buildServer();
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/ngo-applications',
+      payload: await signedApplicationPayload(app, { description: '\t\n ' }),
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe('invalid_request');
+
+    await app.close();
+  });
+
+  it('rejects a website URL exceeding 2048 characters with 400', async () => {
+    const app = buildServer();
+
+    const oversizedWebsite = 'https://example.org/' + 'a'.repeat(2030);
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/ngo-applications',
+      payload: await signedApplicationPayload(app, { website: oversizedWebsite }),
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe('invalid_request');
+
+    await app.close();
+  });
+
+  it('rejects a contactEmail exceeding 254 characters with 400', async () => {
+    const app = buildServer();
+
+    // Build an email that is just over the 254-character RFC 5321 limit.
+    const localPart = 'a'.repeat(243);
+    const oversizedEmail = `${localPart}@example.com`; // 243 + 1 + 11 = 255 chars
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/ngo-applications',
+      payload: await signedApplicationPayload(app, { contactEmail: oversizedEmail }),
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe('invalid_request');
+
+    await app.close();
+  });
+
   it('rejects a malformed ownerAddress with 400', async () => {
     const app = buildServer();
 
